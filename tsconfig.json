@@ -2,7 +2,8 @@
     "compilerOptions": {
         "target": "ES5",
         "module": "es2015",
-        //"strict": true, // aah: currently fails to build in strict mode, as previous build only specified noImplicitAny
+        "moduleResolution": "node",
+        "strict": true,
         "noImplicitAny": true,
         "outDir": "es",
         "declaration": true

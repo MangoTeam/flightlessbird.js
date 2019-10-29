@@ -21,8 +21,7 @@ import { Variable } from "./variable";
  *
  * @enum {Number}
  */
-export
-enum Operator {
+export enum Operator {
     Le,  // <=
     Ge,  // >=
     Eq,   // ==
@@ -40,16 +39,29 @@ enum Operator {
  * @param {Expression} [rhs] Right hand side of the expression.
  * @param {Number} [strength=Strength.required] The strength of the constraint.
  */
-export
-class Constraint {
+export class Constraint {
+
+    private readonly _expression: Expression;
+    private readonly _operator: Operator;
+    private readonly _strength: number;
+    private readonly _id: number;
+
     constructor(
-        expression: Expression|Variable,
+        expression: Expression | Variable,
         operator: Operator,
-        rhs?: Expression|Variable|number,
+        rhs?: Expression | Variable | number,
         strength: number = Strength.required) {
+
+        // todo: is this a correct promotion?
+        if (expression instanceof Variable) {
+            expression = new Expression(expression);
+        }
+
         this._operator = operator;
         this._strength = Strength.clip(strength);
-        if ((rhs === undefined) && (expression instanceof Expression)) {
+        this._id = CnId++;
+
+        if (rhs === undefined) {
             this._expression = expression;
         } else {
             this._expression = expression.minus(rhs);
@@ -92,13 +104,8 @@ class Constraint {
     }
 
     public toString(): string {
-        return this._expression.toString() + " " + ["<=", ">=", "="][this._operator] + " 0 (" + this._strength.toString() + ")";
+        return `${this._expression.toString()} ${["<=", ">=", "="][this._operator]} 0 (${this._strength.toString()})"`;
     }
-
-    private _expression: Expression;
-    private _operator: Operator;
-    private _strength: number;
-    private _id: number = CnId++;
 }
 
 /**

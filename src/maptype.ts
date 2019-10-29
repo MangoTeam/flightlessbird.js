@@ -6,15 +6,15 @@
 | The full license is in the file COPYING.txt, distributed with this software.
 |----------------------------------------------------------------------------*/
 
-export interface IMap<T extends { id(): number }, U> extends IndexedMap<T, U> { }
+export interface IMap<T extends { id(): number }, U> extends IndexedMap<T, U> {
+}
 
-export
-function createMap<T extends { id(): number }, U>(): IMap<T, U> {
+export function createMap<T extends { id(): number }, U>(): IMap<T, U> {
     return new IndexedMap<T, U>();
 }
 
 class IndexedMap<T extends { id(): number }, U> {
-    public index = {} as { [ id: number ]: number | undefined };
+    public index = {} as { [id: number]: number | undefined };
     public array = [] as Array<Pair<T, U>>;
 
     /**
@@ -105,14 +105,14 @@ class IndexedMap<T extends { id(): number }, U> {
      *
      * @param key The key to remove from the map.
      */
-    public erase(key: T): Pair<T, U> {
+    public erase(key: T): Pair<T, U> | undefined {
         const i = this.index[key.id()];
         if (i === undefined) {
             return undefined;
         }
         this.index[key.id()] = undefined;
         const pair = this.array[i];
-        const last = this.array.pop();
+        const last = this.array.pop()!;
         if (pair !== last) {
             this.array[i] = last;
             this.index[last.first.id()] = i;
@@ -139,17 +139,20 @@ class IndexedMap<T extends { id(): number }, U> {
  * @private
  */
 // tslint:disable: max-classes-per-file
-class Pair<T, U> {
+export class Pair<T, U> {
     /**
      * Construct a new Pair object.
      *
      * @param first The first item of the pair.
      * @param second The second item of the pair.
      */
-    constructor(public first: T, public second: U) { }
+    constructor(public first: T, public second: U) {
+    }
 
     /**
      * Create a copy of the pair.
      */
-    public copy() { return new Pair(this.first, this.second); }
+    public copy() {
+        return new Pair(this.first, this.second);
+    }
 }

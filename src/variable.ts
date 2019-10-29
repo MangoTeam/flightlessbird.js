@@ -14,8 +14,12 @@ import { Expression } from "./expression";
  * @class
  * @param {String} [name=""] The name to associated with the variable.
  */
-export
-class Variable {
+export class Variable {
+    private _name: string;
+    private _value: number = 0.0;
+    private _context: any = null;
+    private _id: number = VarId++;
+
     constructor(name: string = "") {
         this._name = name;
     }
@@ -42,7 +46,7 @@ class Variable {
      *
      * @param {String} name Name of the variable
      */
-    public setName( name: string ): void {
+    public setName(name: string): void {
         this._name = name;
     }
 
@@ -58,7 +62,7 @@ class Variable {
      * Set the user context object of the variable.
      * @private
      */
-    public setContext( context: any ): void {
+    public setContext(context: any): void {
         this._context = context;
     }
 
@@ -75,7 +79,7 @@ class Variable {
      * Set the value of the variable.
      * @private
      */
-    public setValue( value: number ): void {
+    public setValue(value: number): void {
         this._value = value;
     }
 
@@ -86,7 +90,7 @@ class Variable {
      * @param {Number|Variable|Expression} value Value to add.
      * @return {Expression} expression
      */
-    public plus( value: number|Variable|Expression ): Expression {
+    public plus(value: number | Variable | Expression): Expression {
         return new Expression(this, value);
     }
 
@@ -97,7 +101,7 @@ class Variable {
      * @param {Number|Variable|Expression} value Value to substract.
      * @return {Expression} expression
      */
-    public minus( value: number|Variable|Expression ): Expression {
+    public minus(value: number | Variable | Expression): Expression {
         return new Expression(this, typeof value === "number" ? -value : [-1, value]);
     }
 
@@ -107,7 +111,7 @@ class Variable {
      * @param {Number} coefficient Coefficient to multiply with.
      * @return {Expression} expression
      */
-    public multiply( coefficient: number ): Expression {
+    public multiply(coefficient: number): Expression {
         return new Expression([coefficient, this]);
     }
 
@@ -117,7 +121,7 @@ class Variable {
      * @param {Number} coefficient Coefficient to divide by.
      * @return {Expression} expression
      */
-    public divide( coefficient: number ): Expression {
+    public divide(coefficient: number): Expression {
         return new Expression([1 / coefficient, this]);
     }
 
@@ -135,11 +139,6 @@ class Variable {
     public toString(): string {
         return this._context + "[" + this._name + ":" + this._value + "]";
     }
-
-    private _name: string;
-    private _value: number = 0.0;
-    private _context: any = null;
-    private _id: number = VarId++;
 }
 
 /**

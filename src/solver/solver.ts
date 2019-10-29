@@ -6,23 +6,35 @@
 | The full license is in the file COPYING.txt, distributed with this software.
 |----------------------------------------------------------------------------*/
 
-import { Constraint, Operator } from "./constraint";
-import { Expression } from "./expression";
-import { createMap, IMap } from "./maptype";
-import { Strength } from "./strength";
-import { Variable } from "./variable";
+import { Constraint, Operator } from "../constraint";
+import { Expression } from "../expression";
+import { createMap, IMap, Pair } from "../maptype";
+import { Strength } from "../strength";
+import { Variable } from "../variable";
+import { INVALID_SYMBOL, SolverSymbol, SymbolType } from "./symbol";
 
 /**
  * The constraint solver class.
  *
  * @class
  */
-export
-class Solver {
+export class Solver {
+
+    private _cnMap = createCnMap();
+    private _rowMap = createRowMap();
+    private _varMap = createVarMap();
+    private _editMap = createEditMap();
+    private _infeasibleRows: SolverSymbol[] = [];
+    private _objective: Row = new Row();
+    private _artificial: Row | null = null;
+    private _idTick: number = 0;
+
     /**
      * Construct a new Solver.
      */
-    constructor() { }
+    // tslint:disable-next-line:no-empty
+    constructor() {
+    }
 
     /**
      * Creates and add a constraint to the solver.
@@ -33,11 +45,11 @@ class Solver {
      * @param {Number} [strength=Strength.required] Strength
      */
     public createConstraint(
-        lhs: Expression|Variable,
+        lhs: Expression | Variable,
         operator: Operator,
-        rhs: Expression|Variable|number,
+        rhs: Expression | Variable | number,
         strength: number = Strength.required): Constraint {
-        let cn = new Constraint(lhs, operator, rhs, strength);
+        const cn = new Constraint(lhs, operator, rhs, strength);
         this.addConstraint(cn);
         return cn;
     }
@@ -48,7 +60,7 @@ class Solver {
      * @param {Constraint} constraint Constraint to add to the solver
      */
     public addConstraint(constraint: Constraint): void {
-        let cnPair = this._cnMap.find(constraint);
+        const cnPair = this._cnMap.find(constraint);
         if (cnPair !== undefined) {
             throw new Error("duplicate constraint");
         }
@@ -59,10 +71,10 @@ class Solver {
         // Since its likely that those variables will be used in other
         // constraints and since exceptional conditions are uncommon,
         // i'm not too worried about aggressive cleanup of the var map.
-        let data = this._createRow( constraint );
-        let row = data.row;
-        let tag = data.tag;
-        let subject = this._chooseSubject( row, tag );
+        const data = this._createRow(constraint);
+        const row = data.row;
+        const tag = data.tag;
+        let subject = this._chooseSubject(row, tag);
 
         // If chooseSubject couldnt find a valid entering symbol, one
         // last option is available if the entire row is composed of
@@ -70,9 +82,9 @@ class Solver {
         // this represents redundant constraints and the new dummy
         // marker can enter the basis. If the constant is non-zero,
         // then it represents an unsatisfiable constraint.
-        if ( subject.type() === SymbolType.Invalid && row.allDummies() ) {
-            if ( !nearZero( row.constant() ) ) {
-                throw new Error( "unsatisfiable constraint" );
+        if (subject.type() === SymbolType.Invalid && row.allDummies()) {
+            if (!nearZero(row.constant())) {
+                throw new Error("unsatisfiable constraint");
             } else {
                 subject = tag.marker;
             }
@@ -81,22 +93,22 @@ class Solver {
         // If an entering symbol still isn't found, then the row must
         // be added using an artificial variable. If that fails, then
         // the row represents an unsatisfiable constraint.
-        if ( subject.type() === SymbolType.Invalid ) {
-            if ( !this._addWithArtificialVariable( row ) ) {
-                throw new Error( "unsatisfiable constraint" );
+        if (subject.type() === SymbolType.Invalid) {
+            if (!this._addWithArtificialVariable(row)) {
+                throw new Error("unsatisfiable constraint");
             }
         } else {
-            row.solveFor( subject );
-            this._substitute( subject, row );
-            this._rowMap.insert( subject, row );
+            row.solveFor(subject);
+            this._substitute(subject, row);
+            this._rowMap.insert(subject, row);
         }
 
-        this._cnMap.insert( constraint, tag );
+        this._cnMap.insert(constraint, tag);
 
         // Optimizing after each constraint is added performs less
         // aggregate work due to a smaller average system size. It
         // also ensures the solver remains in a consistent state.
-        this._optimize( this._objective );
+        this._optimize(this._objective);
     }
 
     /**
@@ -104,35 +116,35 @@ class Solver {
      *
      * @param {Constraint} constraint Constraint to remove from the solver
      */
-    public removeConstraint( constraint: Constraint ): void {
-        let cnPair = this._cnMap.erase( constraint );
-        if ( cnPair === undefined ) {
-            throw new Error( "unknown constraint" );
+    public removeConstraint(constraint: Constraint): void {
+        const cnPair = this._cnMap.erase(constraint);
+        if (cnPair === undefined) {
+            throw new Error("unknown constraint");
         }
 
         // Remove the error effects from the objective function
         // *before* pivoting, or substitutions into the objective
         // will lead to incorrect solver results.
-        this._removeConstraintEffects( constraint, cnPair.second );
+        this._removeConstraintEffects(constraint, cnPair.second);
 
         // If the marker is basic, simply drop the row. Otherwise,
         // pivot the marker into the basis and then drop the row.
-        let marker = cnPair.second.marker;
-        let rowPair = this._rowMap.erase( marker );
-        if ( rowPair === undefined ) {
-            let leaving = this._getMarkerLeavingSymbol( marker );
-            if ( leaving.type() === SymbolType.Invalid ) {
-                throw new Error( "failed to find leaving row" );
+        const marker = cnPair.second.marker;
+        let rowPair = this._rowMap.erase(marker);
+        if (rowPair === undefined) {
+            const leaving = this._getMarkerLeavingSymbol(marker);
+            if (leaving.type() === SymbolType.Invalid) {
+                throw new Error("failed to find leaving row");
             }
-            rowPair = this._rowMap.erase( leaving );
-            rowPair.second.solveForEx( leaving, marker );
-            this._substitute( marker, rowPair.second );
+            rowPair = this._rowMap.erase(leaving)!;
+            rowPair.second.solveForEx(leaving, marker);
+            this._substitute(marker, rowPair.second);
         }
 
         // Optimizing after each constraint is removed ensures that the
         // solver remains consistent. It makes the solver api easier to
         // use at a small tradeoff for speed.
-        this._optimize( this._objective );
+        this._optimize(this._objective);
     }
 
     /**
@@ -141,8 +153,8 @@ class Solver {
      * @param {Constraint} constraint Constraint to test for
      * @return {Bool} true or false
      */
-    public hasConstraint( constraint: Constraint ): boolean {
-        return this._cnMap.contains( constraint );
+    public hasConstraint(constraint: Constraint): boolean {
+        return this._cnMap.contains(constraint);
     }
 
     /**
@@ -151,21 +163,22 @@ class Solver {
      * @param {Variable} variable Edit variable to add to the solver
      * @param {Number} strength Strength, should be less than `Strength.required`
      */
-    public addEditVariable( variable: Variable, strength: number ): void {
-        let editPair = this._editMap.find( variable );
-        if ( editPair !== undefined ) {
-            throw new Error( "duplicate edit variable" );
+    public addEditVariable(variable: Variable, strength: number): void {
+        const editPair = this._editMap.find(variable);
+        if (editPair !== undefined) {
+            throw new Error("duplicate edit variable");
         }
-        strength = Strength.clip( strength );
-        if ( strength === Strength.required ) {
-            throw new Error( "bad required strength" );
+        strength = Strength.clip(strength);
+        if (strength === Strength.required) {
+            throw new Error("bad required strength");
         }
-        let expr = new Expression( variable );
-        let cn = new Constraint( expr, Operator.Eq, undefined, strength );
-        this.addConstraint( cn );
-        let tag = this._cnMap.find( cn ).second;
-        let info = { tag, constraint: cn, constant: 0.0 };
-        this._editMap.insert( variable, info );
+        const expr = new Expression(variable);
+        const cn = new Constraint(expr, Operator.Eq, undefined, strength);
+        this.addConstraint(cn);
+
+        const tag = this._cnMap.find(cn)!.second;
+        const info = {tag, constraint: cn, constant: 0.0};
+        this._editMap.insert(variable, info);
     }
 
     /**
@@ -173,12 +186,12 @@ class Solver {
      *
      * @param {Variable} variable Edit variable to remove from the solver
      */
-    public removeEditVariable( variable: Variable ): void {
-        let editPair = this._editMap.erase( variable );
-        if ( editPair === undefined ) {
-            throw new Error( "unknown edit variable" );
+    public removeEditVariable(variable: Variable): void {
+        const editPair = this._editMap.erase(variable);
+        if (editPair === undefined) {
+            throw new Error("unknown edit variable");
         }
-        this.removeConstraint( editPair.second.constraint );
+        this.removeConstraint(editPair.second.constraint);
     }
 
     /**
@@ -187,8 +200,8 @@ class Solver {
      * @param {Variable} variable Edit variable to test for
      * @return {Bool} true or false
      */
-    public hasEditVariable( variable: Variable ): boolean {
-        return this._editMap.contains( variable );
+    public hasEditVariable(variable: Variable): boolean {
+        return this._editMap.contains(variable);
     }
 
     /**
@@ -197,47 +210,49 @@ class Solver {
      * @param {Variable} variable Edit variable to suggest a value for
      * @param {Number} value Suggested value
      */
-    public suggestValue( variable: Variable, value: number ): void {
-        let editPair = this._editMap.find( variable );
-        if ( editPair === undefined ) {
-            throw new Error( "unknown edit variable" );
+    public suggestValue(variable: Variable, value: number): void {
+        const editPair = this._editMap.find(variable);
+        if (editPair === undefined) {
+            throw new Error("unknown edit variable");
         }
 
-        let rows = this._rowMap;
-        let info = editPair.second;
-        let delta = value - info.constant;
+        const rows = this._rowMap;
+        const info = editPair.second;
+        const delta = value - info.constant;
         info.constant = value;
 
+        let rowPair: Pair<SolverSymbol, Row> | undefined;
+
         // Check first if the positive error variable is basic.
-        let marker = info.tag.marker;
-        let rowPair = rows.find( marker );
-        if ( rowPair !== undefined ) {
-            if ( rowPair.second.add( -delta ) < 0.0 ) {
-                this._infeasibleRows.push( marker );
+        const marker = info.tag.marker;
+        rowPair = rows.find(marker);
+        if (rowPair !== undefined) {
+            if (rowPair.second.add(-delta) < 0.0) {
+                this._infeasibleRows.push(marker);
             }
             this._dualOptimize();
             return;
         }
 
         // Check next if the negative error variable is basic.
-        let other = info.tag.other;
-        rowPair = rows.find( other );
-        if ( rowPair !== undefined ) {
-            if ( rowPair.second.add( delta ) < 0.0 ) {
-                this._infeasibleRows.push( other );
+        const other = info.tag.other;
+        rowPair = rows.find(other);
+        if (rowPair !== undefined) {
+            if (rowPair.second.add(delta) < 0.0) {
+                this._infeasibleRows.push(other);
             }
             this._dualOptimize();
             return;
         }
 
         // Otherwise update each row where the error variables exist.
-        for ( let i = 0, n = rows.size(); i < n; ++i ) {
-            let rowPair = rows.itemAt( i );
-            let row = rowPair.second;
-            let coeff = row.coefficientFor( marker );
-            if ( coeff !== 0.0 && row.add( delta * coeff ) < 0.0 &&
-                rowPair.first.type() !== SymbolType.External ) {
-                this._infeasibleRows.push( rowPair.first );
+        for (let i = 0, n = rows.size(); i < n; ++i) {
+            rowPair = rows.itemAt(i);
+            const row = rowPair.second;
+            const coeff = row.coefficientFor(marker);
+            if (coeff !== 0.0 && row.add(delta * coeff) < 0.0 &&
+                rowPair.first.type() !== SymbolType.External) {
+                this._infeasibleRows.push(rowPair.first);
             }
         }
         this._dualOptimize();
@@ -247,15 +262,15 @@ class Solver {
      * Update the values of the variables.
      */
     public updateVariables(): void {
-        let vars = this._varMap;
-        let rows = this._rowMap;
-        for ( let i = 0, n = vars.size(); i < n; ++i ) {
-            let pair = vars.itemAt( i );
-            let rowPair = rows.find( pair.second );
-            if ( rowPair !== undefined ) {
-                pair.first.setValue( rowPair.second.constant() );
+        const vars = this._varMap;
+        const rows = this._rowMap;
+        for (let i = 0, n = vars.size(); i < n; ++i) {
+            const pair = vars.itemAt(i);
+            const rowPair = rows.find(pair.second);
+            if (rowPair !== undefined) {
+                pair.first.setValue(rowPair.second.constant());
             } else {
-                pair.first.setValue( 0.0 );
+                pair.first.setValue(0.0);
             }
         }
     }
@@ -266,9 +281,9 @@ class Solver {
      * If a symbol does not exist for the variable, one will be created.
      * @private
      */
-    private _getVarSymbol( variable: Variable ): Symbol {
-        let factory = () => this._makeSymbol( SymbolType.External );
-        return this._varMap.setDefault( variable, factory ).second;
+    private _getVarSymbol(variable: Variable): SolverSymbol {
+        const factory = () => this._makeSymbol(SymbolType.External);
+        return this._varMap.setDefault(variable, factory).second;
     }
 
     /**
@@ -288,71 +303,69 @@ class Solver {
      * Returns the created Row and the tag for tracking the constraint.
      * @private
      */
-    private _createRow( constraint: Constraint ): IRowCreation {
-        let expr = constraint.expression();
-        let row = new Row( expr.constant() );
+    private _createRow(constraint: Constraint): IRowCreation {
+        const expr = constraint.expression();
+        const row = new Row(expr.constant());
 
         // Substitute the current basic variables into the row.
-        let terms = expr.terms();
-        for ( let i = 0, n = terms.size(); i < n; ++i ) {
-            let termPair = terms.itemAt( i );
-            if ( !nearZero( termPair.second ) ) {
-                let symbol = this._getVarSymbol( termPair.first );
-                let basicPair = this._rowMap.find( symbol );
-                if ( basicPair !== undefined ) {
-                    row.insertRow( basicPair.second, termPair.second );
+        const terms = expr.terms();
+        for (let i = 0, n = terms.size(); i < n; ++i) {
+            const termPair = terms.itemAt(i);
+            if (!nearZero(termPair.second)) {
+                const symbol = this._getVarSymbol(termPair.first);
+                const basicPair = this._rowMap.find(symbol);
+                if (basicPair !== undefined) {
+                    row.insertRow(basicPair.second, termPair.second);
                 } else {
-                    row.insertSymbol( symbol, termPair.second );
+                    row.insertSymbol(symbol, termPair.second);
                 }
             }
         }
 
         // Add the necessary slack, error, and dummy variables.
-        let objective = this._objective;
-        let strength = constraint.strength();
-        let tag = { marker: INVALID_SYMBOL, other: INVALID_SYMBOL };
-        switch ( constraint.op() ) {
+        const objective = this._objective;
+        const strength = constraint.strength();
+        const tag = {marker: INVALID_SYMBOL, other: INVALID_SYMBOL};
+        switch (constraint.op()) {
             case Operator.Le:
-            case Operator.Ge:
-            {
-                let coeff = constraint.op() === Operator.Le ? 1.0 : -1.0;
-                let slack = this._makeSymbol( SymbolType.Slack );
+            case Operator.Ge: {
+                const coeff = constraint.op() === Operator.Le ? 1.0 : -1.0;
+                const slack = this._makeSymbol(SymbolType.Slack);
                 tag.marker = slack;
-                row.insertSymbol( slack, coeff );
-                if ( strength < Strength.required ) {
-                    let error = this._makeSymbol( SymbolType.Error );
+                row.insertSymbol(slack, coeff);
+                if (strength < Strength.required) {
+                    const error = this._makeSymbol(SymbolType.Error);
                     tag.other = error;
-                    row.insertSymbol( error, -coeff );
-                    objective.insertSymbol( error, strength );
+                    row.insertSymbol(error, -coeff);
+                    objective.insertSymbol(error, strength);
                 }
                 break;
             }
-            case Operator.Eq:
-            {
-                if ( strength < Strength.required ) {
-                    let errplus = this._makeSymbol( SymbolType.Error );
-                    let errminus = this._makeSymbol( SymbolType.Error );
+            case Operator.Eq: {
+                if (strength < Strength.required) {
+                    const errplus = this._makeSymbol(SymbolType.Error);
+                    const errminus = this._makeSymbol(SymbolType.Error);
                     tag.marker = errplus;
                     tag.other = errminus;
-                    row.insertSymbol( errplus, -1.0 ); // v = eplus - eminus
-                    row.insertSymbol( errminus, 1.0 ); // v - eplus + eminus = 0
-                    objective.insertSymbol( errplus, strength );
-                    objective.insertSymbol( errminus, strength );
+                    row.insertSymbol(errplus, -1.0); // v = eplus - eminus
+                    row.insertSymbol(errminus, 1.0); // v - eplus + eminus = 0
+                    objective.insertSymbol(errplus, strength);
+                    objective.insertSymbol(errminus, strength);
                 } else {
-                    let dummy = this._makeSymbol( SymbolType.Dummy );
+                    const dummy = this._makeSymbol(SymbolType.Dummy);
                     tag.marker = dummy;
-                    row.insertSymbol( dummy );
+                    row.insertSymbol(dummy);
                 }
                 break;
             }
         }
 
         // Ensure the row has a positive constant.
-        if ( row.constant() < 0.0 ) {
+        if (row.constant() < 0.0) {
             row.reverseSign();
         }
 
-        return { row, tag };
+        return {row, tag};
     }
 
     /**
@@ -371,23 +384,23 @@ class Solver {
      *
      * @private
      */
-    private _chooseSubject( row: Row, tag: ITag ): Symbol {
-        let cells = row.cells();
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            let pair = cells.itemAt( i );
-            if ( pair.first.type() === SymbolType.External ) {
+    private _chooseSubject(row: Row, tag: ITag): SolverSymbol {
+        const cells = row.cells();
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            const pair = cells.itemAt(i);
+            if (pair.first.type() === SymbolType.External) {
                 return pair.first;
             }
         }
         let type = tag.marker.type();
-        if ( type === SymbolType.Slack || type === SymbolType.Error ) {
-            if ( row.coefficientFor( tag.marker ) < 0.0 ) {
+        if (type === SymbolType.Slack || type === SymbolType.Error) {
+            if (row.coefficientFor(tag.marker) < 0.0) {
                 return tag.marker;
             }
         }
         type = tag.other.type();
-        if ( type === SymbolType.Slack || type === SymbolType.Error ) {
-            if ( row.coefficientFor( tag.other ) < 0.0 ) {
+        if (type === SymbolType.Slack || type === SymbolType.Error) {
+            if (row.coefficientFor(tag.other) < 0.0) {
                 return tag.other;
             }
         }
@@ -401,41 +414,41 @@ class Solver {
      *
      * @private
      */
-    private _addWithArtificialVariable( row: Row ): boolean {
+    private _addWithArtificialVariable(row: Row): boolean {
         // Create and add the artificial variable to the tableau.
-        let art = this._makeSymbol( SymbolType.Slack );
-        this._rowMap.insert( art, row.copy() );
+        const art = this._makeSymbol(SymbolType.Slack);
+        this._rowMap.insert(art, row.copy());
         this._artificial = row.copy();
 
         // Optimize the artificial objective. This is successful
         // only if the artificial objective is optimized to zero.
-        this._optimize( this._artificial );
-        let success = nearZero( this._artificial.constant() );
+        this._optimize(this._artificial);
+        const success = nearZero(this._artificial.constant());
         this._artificial = null;
 
         // If the artificial variable is basic, pivot the row so that
         // it becomes non-basic. If the row is constant, exit early.
-        let pair = this._rowMap.erase( art );
-        if ( pair !== undefined ) {
-            let basicRow = pair.second;
-            if ( basicRow.isConstant() ) {
+        const pair = this._rowMap.erase(art);
+        if (pair !== undefined) {
+            const basicRow = pair.second;
+            if (basicRow.isConstant()) {
                 return success;
             }
-            let entering = this._anyPivotableSymbol( basicRow );
-            if ( entering.type() === SymbolType.Invalid ) {
+            const entering = this._anyPivotableSymbol(basicRow);
+            if (entering.type() === SymbolType.Invalid) {
                 return false;  // unsatisfiable (will this ever happen?)
             }
-            basicRow.solveForEx( art, entering );
-            this._substitute( entering, basicRow );
-            this._rowMap.insert( entering, basicRow );
+            basicRow.solveForEx(art, entering);
+            this._substitute(entering, basicRow);
+            this._rowMap.insert(entering, basicRow);
         }
 
         // Remove the artificial variable from the tableau.
-        let rows = this._rowMap;
-        for ( let i = 0, n = rows.size(); i < n; ++i ) {
-            rows.itemAt( i ).second.removeSymbol( art );
+        const rows = this._rowMap;
+        for (let i = 0, n = rows.size(); i < n; ++i) {
+            rows.itemAt(i).second.removeSymbol(art);
         }
-        this._objective.removeSymbol( art );
+        this._objective.removeSymbol(art);
         return success;
     }
 
@@ -447,19 +460,19 @@ class Solver {
      *
      * @private
      */
-    private _substitute( symbol: Symbol, row: Row ): void {
-        let rows = this._rowMap;
-        for ( let i = 0, n = rows.size(); i < n; ++i ) {
-            let pair = rows.itemAt( i );
-            pair.second.substitute( symbol, row );
-            if ( pair.second.constant() < 0.0 &&
-                pair.first.type() !== SymbolType.External ) {
-                this._infeasibleRows.push( pair.first );
+    private _substitute(symbol: SolverSymbol, row: Row): void {
+        const rows = this._rowMap;
+        for (let i = 0, n = rows.size(); i < n; ++i) {
+            const pair = rows.itemAt(i);
+            pair.second.substitute(symbol, row);
+            if (pair.second.constant() < 0.0 &&
+                pair.first.type() !== SymbolType.External) {
+                this._infeasibleRows.push(pair.first);
             }
         }
-        this._objective.substitute( symbol, row );
-        if ( this._artificial ) {
-            this._artificial.substitute( symbol, row );
+        this._objective.substitute(symbol, row);
+        if (this._artificial) {
+            this._artificial.substitute(symbol, row);
         }
     }
 
@@ -471,21 +484,21 @@ class Solver {
      *
      * @private
      */
-    private _optimize( objective: Row ): void {
-        while ( true ) {
-            let entering = this._getEnteringSymbol( objective );
-            if ( entering.type() === SymbolType.Invalid ) {
+    private _optimize(objective: Row): void {
+        while (true) {
+            const entering = this._getEnteringSymbol(objective);
+            if (entering.type() === SymbolType.Invalid) {
                 return;
             }
-            let leaving = this._getLeavingSymbol( entering );
-            if ( leaving.type() === SymbolType.Invalid ) {
-                throw new Error( "the objective is unbounded" );
+            const leaving = this._getLeavingSymbol(entering);
+            if (leaving.type() === SymbolType.Invalid) {
+                throw new Error("the objective is unbounded");
             }
             // pivot the entering symbol into the basis
-            let row = this._rowMap.erase( leaving ).second;
-            row.solveForEx( leaving, entering );
-            this._substitute( entering, row );
-            this._rowMap.insert( entering, row );
+            const row = this._rowMap.erase(leaving)!.second;
+            row.solveForEx(leaving, entering);
+            this._substitute(entering, row);
+            this._rowMap.insert(entering, row);
         }
     }
 
@@ -500,22 +513,22 @@ class Solver {
      * @private
      */
     private _dualOptimize(): void {
-        let rows = this._rowMap;
-        let infeasible = this._infeasibleRows;
-        while ( infeasible.length !== 0 ) {
-            let leaving = infeasible.pop();
-            let pair = rows.find( leaving );
-            if ( pair !== undefined && pair.second.constant() < 0.0 ) {
-                let entering = this._getDualEnteringSymbol( pair.second );
-                if ( entering.type() === SymbolType.Invalid ) {
-                    throw new Error( "dual optimize failed" );
+        const rows = this._rowMap;
+        const infeasible = this._infeasibleRows;
+        while (infeasible.length !== 0) {
+            const leaving = infeasible.pop()!;
+            const pair = rows.find(leaving);
+            if (pair !== undefined && pair.second.constant() < 0.0) {
+                const entering = this._getDualEnteringSymbol(pair.second);
+                if (entering.type() === SymbolType.Invalid) {
+                    throw new Error("dual optimize failed");
                 }
                 // pivot the entering symbol into the basis
-                let row = pair.second;
-                rows.erase( leaving );
-                row.solveForEx( leaving, entering );
-                this._substitute( entering, row );
-                rows.insert( entering, row );
+                const row = pair.second;
+                rows.erase(leaving);
+                row.solveForEx(leaving, entering);
+                this._substitute(entering, row);
+                rows.insert(entering, row);
             }
         }
     }
@@ -530,12 +543,12 @@ class Solver {
      *
      * @private
      */
-    private _getEnteringSymbol( objective: Row ): Symbol {
-        let cells = objective.cells();
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            let pair = cells.itemAt( i );
-            let symbol = pair.first;
-            if ( pair.second < 0.0 && symbol.type() !== SymbolType.Dummy ) {
+    private _getEnteringSymbol(objective: Row): SolverSymbol {
+        const cells = objective.cells();
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            const pair = cells.itemAt(i);
+            const symbol = pair.first;
+            if (pair.second < 0.0 && symbol.type() !== SymbolType.Dummy) {
                 return symbol;
             }
         }
@@ -553,18 +566,18 @@ class Solver {
      *
      * @private
      */
-    private _getDualEnteringSymbol( row: Row ): Symbol {
+    private _getDualEnteringSymbol(row: Row): SolverSymbol {
         let ratio = Number.MAX_VALUE;
         let entering = INVALID_SYMBOL;
-        let cells = row.cells();
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            let pair = cells.itemAt( i );
-            let symbol = pair.first;
-            let c = pair.second;
-            if ( c > 0.0 && symbol.type() !== SymbolType.Dummy ) {
-                let coeff = this._objective.coefficientFor( symbol );
-                let r = coeff / c;
-                if ( r < ratio ) {
+        const cells = row.cells();
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            const pair = cells.itemAt(i);
+            const symbol = pair.first;
+            const c = pair.second;
+            if (c > 0.0 && symbol.type() !== SymbolType.Dummy) {
+                const coeff = this._objective.coefficientFor(symbol);
+                const r = coeff / c;
+                if (r < ratio) {
                     ratio = r;
                     entering = symbol;
                 }
@@ -583,19 +596,19 @@ class Solver {
      *
      * @private
      */
-    private _getLeavingSymbol( entering: Symbol ): Symbol {
+    private _getLeavingSymbol(entering: SolverSymbol): SolverSymbol {
         let ratio = Number.MAX_VALUE;
         let found = INVALID_SYMBOL;
-        let rows = this._rowMap;
-        for ( let i = 0, n = rows.size(); i < n; ++i ) {
-            let pair = rows.itemAt( i );
-            let symbol = pair.first;
-            if ( symbol.type() !== SymbolType.External ) {
-                let row = pair.second;
-                let temp = row.coefficientFor( entering );
-                if ( temp < 0.0 ) {
-                    let temp_ratio = -row.constant() / temp;
-                    if ( temp_ratio < ratio ) {
+        const rows = this._rowMap;
+        for (let i = 0, n = rows.size(); i < n; ++i) {
+            const pair = rows.itemAt(i);
+            const symbol = pair.first;
+            if (symbol.type() !== SymbolType.External) {
+                const row = pair.second;
+                const temp = row.coefficientFor(entering);
+                if (temp < 0.0) {
+                    const temp_ratio = -row.constant() / temp;
+                    if (temp_ratio < ratio) {
                         ratio = temp_ratio;
                         found = symbol;
                     }
@@ -626,43 +639,43 @@ class Solver {
      *
      * @private
      */
-    private _getMarkerLeavingSymbol( marker: Symbol ): Symbol {
-        let dmax = Number.MAX_VALUE;
+    private _getMarkerLeavingSymbol(marker: SolverSymbol): SolverSymbol {
+        const dmax = Number.MAX_VALUE;
         let r1 = dmax;
         let r2 = dmax;
-        let invalid = INVALID_SYMBOL;
+        const invalid = INVALID_SYMBOL;
         let first = invalid;
         let second = invalid;
         let third = invalid;
-        let rows = this._rowMap;
-        for ( let i = 0, n = rows.size(); i < n; ++i ) {
-            let pair = rows.itemAt( i );
-            let row = pair.second;
-            let c = row.coefficientFor( marker );
-            if ( c === 0.0 ) {
+        const rows = this._rowMap;
+        for (let i = 0, n = rows.size(); i < n; ++i) {
+            const pair = rows.itemAt(i);
+            const row = pair.second;
+            const c = row.coefficientFor(marker);
+            if (c === 0.0) {
                 continue;
             }
-            let symbol = pair.first;
-            if ( symbol.type() === SymbolType.External ) {
+            const symbol = pair.first;
+            if (symbol.type() === SymbolType.External) {
                 third = symbol;
-            } else if ( c < 0.0 ) {
-                let r = -row.constant() / c;
-                if ( r < r1 ) {
+            } else if (c < 0.0) {
+                const r = -row.constant() / c;
+                if (r < r1) {
                     r1 = r;
                     first = symbol;
                 }
             } else {
-                let r = row.constant() / c;
-                if ( r < r2 ) {
+                const r = row.constant() / c;
+                if (r < r2) {
                     r2 = r;
                     second = symbol;
                 }
             }
         }
-        if ( first !== invalid ) {
+        if (first !== invalid) {
             return first;
         }
-        if ( second !== invalid ) {
+        if (second !== invalid) {
             return second;
         }
         return third;
@@ -673,12 +686,12 @@ class Solver {
      *
      * @private
      */
-    private _removeConstraintEffects( cn: Constraint, tag: ITag ): void {
-        if ( tag.marker.type() === SymbolType.Error ) {
-            this._removeMarkerEffects( tag.marker, cn.strength() );
+    private _removeConstraintEffects(cn: Constraint, tag: ITag): void {
+        if (tag.marker.type() === SymbolType.Error) {
+            this._removeMarkerEffects(tag.marker, cn.strength());
         }
-        if ( tag.other.type() === SymbolType.Error ) {
-            this._removeMarkerEffects( tag.other, cn.strength() );
+        if (tag.other.type() === SymbolType.Error) {
+            this._removeMarkerEffects(tag.other, cn.strength());
         }
     }
 
@@ -687,12 +700,12 @@ class Solver {
      *
      * @private
      */
-    private _removeMarkerEffects( marker: Symbol, strength: number ): void {
-        let pair = this._rowMap.find( marker );
-        if ( pair !== undefined ) {
-            this._objective.insertRow( pair.second, -strength );
+    private _removeMarkerEffects(marker: SolverSymbol, strength: number): void {
+        const pair = this._rowMap.find(marker);
+        if (pair !== undefined) {
+            this._objective.insertRow(pair.second, -strength);
         } else {
-            this._objective.insertSymbol( marker, -strength );
+            this._objective.insertSymbol(marker, -strength);
         }
     }
 
@@ -703,12 +716,12 @@ class Solver {
      *
      * @private
      */
-    private _anyPivotableSymbol( row: Row ): Symbol {
-        let cells = row.cells();
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            let pair = cells.itemAt( i );
-            let type = pair.first.type();
-            if ( type === SymbolType.Slack || type === SymbolType.Error ) {
+    private _anyPivotableSymbol(row: Row): SolverSymbol {
+        const cells = row.cells();
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            const pair = cells.itemAt(i);
+            const type = pair.first.type();
+            if (type === SymbolType.Slack || type === SymbolType.Error) {
                 return pair.first;
             }
         }
@@ -720,26 +733,17 @@ class Solver {
      *
      * @private
      */
-    private _makeSymbol( type: SymbolType ): Symbol {
-        return new Symbol( type, this._idTick++ );
+    private _makeSymbol(type: SymbolType): SolverSymbol {
+        return new SolverSymbol(type, this._idTick++);
     }
-
-    private _cnMap = createCnMap();
-    private _rowMap = createRowMap();
-    private _varMap = createVarMap();
-    private _editMap = createEditMap();
-    private _infeasibleRows: Symbol[] = [];
-    private _objective: Row = new Row();
-    private _artificial: Row = null;
-    private _idTick: number = 0;
 }
 
 /**
  * Test whether a value is approximately zero.
  * @private
  */
-function nearZero( value: number ): boolean {
-    let eps = 1.0e-8;
+function nearZero(value: number): boolean {
+    const eps = 1.0e-8;
     return value < 0.0 ? -value < eps : value < eps;
 }
 
@@ -747,8 +751,8 @@ function nearZero( value: number ): boolean {
  * The internal interface of a tag value.
  */
 interface ITag {
-    marker: Symbol;
-    other: Symbol;
+    marker: SolverSymbol;
+    other: SolverSymbol;
 }
 
 /**
@@ -780,16 +784,16 @@ function createCnMap(): IMap<Constraint, ITag> {
  * An internal function for creating a row map.
  * @private
  */
-function createRowMap(): IMap<Symbol, Row> {
-    return createMap<Symbol, Row>();
+function createRowMap(): IMap<SolverSymbol, Row> {
+    return createMap<SolverSymbol, Row>();
 }
 
 /**
  * An internal function for creating a variable map.
  * @private
  */
-function createVarMap(): IMap<Variable, Symbol> {
-    return createMap<Variable, Symbol>();
+function createVarMap(): IMap<Variable, SolverSymbol> {
+    return createMap<Variable, SolverSymbol>();
 }
 
 /**
@@ -801,73 +805,25 @@ function createEditMap(): IMap<Variable, IEditInfo> {
 }
 
 /**
- * An enum defining the available symbol types.
- * @private
- */
-enum SymbolType {
-    Invalid,
-    External,
-    Slack,
-    Error,
-    Dummy,
-}
-
-/**
- * An internal class representing a symbol in the solver.
- * @private
- */
-class Symbol {
-    /**
-     * Construct a new Symbol
-     *
-     * @param [type] The type of the symbol.
-     * @param [id] The unique id number of the symbol.
-     */
-    constructor( type: SymbolType, id: number ) {
-        this._id = id;
-        this._type = type;
-    }
-
-    /**
-     * Returns the unique id number of the symbol.
-     */
-    public id(): number {
-        return this._id;
-    }
-
-    /**
-     * Returns the type of the symbol.
-     */
-    public type(): SymbolType {
-        return this._type;
-    }
-
-    private _id: number;
-    private _type: SymbolType;
-}
-
-/**
- * A static invalid symbol
- * @private
- */
-let INVALID_SYMBOL = new Symbol( SymbolType.Invalid, -1 );
-
-/**
  * An internal row class used by the solver.
  * @private
  */
 class Row {
+
+    private _cellMap = createMap<SolverSymbol, number>();
+    private _constant: number;
+
     /**
      * Construct a new Row.
      */
-    constructor( constant: number = 0.0 ) {
+    constructor(constant: number = 0.0) {
         this._constant = constant;
     }
 
     /**
      * Returns the mapping of symbols to coefficients.
      */
-    public cells(): IMap<Symbol, number> {
+    public cells(): IMap<SolverSymbol, number> {
         return this._cellMap;
     }
 
@@ -889,10 +845,10 @@ class Row {
      * Returns true if the Row has all dummy symbols.
      */
     public allDummies(): boolean {
-        let cells = this._cellMap;
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            let pair = cells.itemAt( i );
-            if ( pair.first.type() !== SymbolType.Dummy ) {
+        const cells = this._cellMap;
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            const pair = cells.itemAt(i);
+            if (pair.first.type() !== SymbolType.Dummy) {
                 return false;
             }
         }
@@ -903,7 +859,7 @@ class Row {
      * Create a copy of the row.
      */
     public copy(): Row {
-        let theCopy = new Row( this._constant );
+        const theCopy = new Row(this._constant);
         theCopy._cellMap = this._cellMap.copy();
         return theCopy;
     }
@@ -913,7 +869,7 @@ class Row {
      *
      * Returns the new value of the constant.
      */
-    public add( value: number ): number {
+    public add(value: number): number {
         return this._constant += value;
     }
 
@@ -924,10 +880,10 @@ class Row {
      * will be added to the existing coefficient. If the resulting
      * coefficient is zero, the symbol will be removed from the row.
      */
-    public insertSymbol( symbol: Symbol, coefficient: number = 1.0 ): void {
-        let pair = this._cellMap.setDefault( symbol, () => 0.0 );
-        if ( nearZero( pair.second += coefficient ) ) {
-            this._cellMap.erase( symbol );
+    public insertSymbol(symbol: SolverSymbol, coefficient: number = 1.0): void {
+        const pair = this._cellMap.setDefault(symbol, () => 0.0);
+        if (nearZero(pair.second += coefficient)) {
+            this._cellMap.erase(symbol);
         }
     }
 
@@ -939,20 +895,20 @@ class Row {
      * cell with a resulting coefficient of zero will be removed
      * from the row.
      */
-    public insertRow( other: Row, coefficient: number = 1.0 ): void {
+    public insertRow(other: Row, coefficient: number = 1.0): void {
         this._constant += other._constant * coefficient;
-        let cells = other._cellMap;
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            let pair = cells.itemAt( i );
-            this.insertSymbol( pair.first, pair.second * coefficient );
+        const cells = other._cellMap;
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            const pair = cells.itemAt(i);
+            this.insertSymbol(pair.first, pair.second * coefficient);
         }
     }
 
     /**
      * Remove a symbol from the row.
      */
-    public removeSymbol( symbol: Symbol ): void {
-        this._cellMap.erase( symbol );
+    public removeSymbol(symbol: SolverSymbol): void {
+        this._cellMap.erase(symbol);
     }
 
     /**
@@ -960,9 +916,9 @@ class Row {
      */
     public reverseSign(): void {
         this._constant = -this._constant;
-        let cells = this._cellMap;
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            let pair = cells.itemAt( i );
+        const cells = this._cellMap;
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            const pair = cells.itemAt(i);
             pair.second = -pair.second;
         }
     }
@@ -979,13 +935,16 @@ class Row {
      *
      * The given symbol *must* exist in the row.
      */
-    public solveFor( symbol: Symbol ): void {
-        let cells = this._cellMap;
-        let pair = cells.erase( symbol );
-        let coeff = -1.0 / pair.second;
+    public solveFor(symbol: SolverSymbol): void {
+        const cells = this._cellMap;
+        const pair = cells.erase(symbol);
+        if (pair === undefined) {
+            throw new Error(`Cannot solve row for missing symbol ${symbol}.`);
+        }
+        const coeff = -1.0 / pair.second;
         this._constant *= coeff;
-        for ( let i = 0, n = cells.size(); i < n; ++i ) {
-            cells.itemAt( i ).second *= coeff;
+        for (let i = 0, n = cells.size(); i < n; ++i) {
+            cells.itemAt(i).second *= coeff;
         }
     }
 
@@ -1001,16 +960,16 @@ class Row {
      * The lhs symbol *must not* exist in the row, and the rhs
      * symbol must* exist in the row.
      */
-    public solveForEx( lhs: Symbol, rhs: Symbol ): void {
-        this.insertSymbol( lhs, -1.0 );
-        this.solveFor( rhs );
+    public solveForEx(lhs: SolverSymbol, rhs: SolverSymbol): void {
+        this.insertSymbol(lhs, -1.0);
+        this.solveFor(rhs);
     }
 
     /**
      * Returns the coefficient for the given symbol.
      */
-    public coefficientFor( symbol: Symbol ): number {
-        let pair = this._cellMap.find( symbol );
+    public coefficientFor(symbol: SolverSymbol): number {
+        const pair = this._cellMap.find(symbol);
         return pair !== undefined ? pair.second : 0.0;
     }
 
@@ -1023,13 +982,10 @@ class Row {
      *
      * If the symbol does not exist in the row, this is a no-op.
      */
-    public substitute( symbol: Symbol, row: Row ): void {
-        let pair = this._cellMap.erase( symbol );
-        if ( pair !== undefined ) {
-            this.insertRow( row, pair.second );
+    public substitute(symbol: SolverSymbol, row: Row): void {
+        const pair = this._cellMap.erase(symbol);
+        if (pair !== undefined) {
+            this.insertRow(row, pair.second);
         }
     }
-
-    private _cellMap = createMap<Symbol, number>();
-    private _constant: number;
 }
