@@ -211,49 +211,18 @@ export class Solver {
      * @param {Number} value Suggested value
      */
     public suggestValue(variable: Variable, value: number): void {
-        const editPair = this._editMap.find(variable);
-        if (editPair === undefined) {
-            throw new Error("unknown edit variable");
-        }
+        this._suggestValue(variable, value);
+        this._dualOptimize();
+    }
 
-        const rows = this._rowMap;
-        const info = editPair.second;
-        const delta = value - info.constant;
-        info.constant = value;
-
-        let rowPair: Pair<SolverSymbol, Row> | undefined;
-
-        // Check first if the positive error variable is basic.
-        const marker = info.tag.marker;
-        rowPair = rows.find(marker);
-        if (rowPair !== undefined) {
-            if (rowPair.second.add(-delta) < 0.0) {
-                this._infeasibleRows.push(marker);
-            }
-            this._dualOptimize();
-            return;
-        }
-
-        // Check next if the negative error variable is basic.
-        const other = info.tag.other;
-        rowPair = rows.find(other);
-        if (rowPair !== undefined) {
-            if (rowPair.second.add(delta) < 0.0) {
-                this._infeasibleRows.push(other);
-            }
-            this._dualOptimize();
-            return;
-        }
-
-        // Otherwise update each row where the error variables exist.
-        for (let i = 0, n = rows.size(); i < n; ++i) {
-            rowPair = rows.itemAt(i);
-            const row = rowPair.second;
-            const coeff = row.coefficientFor(marker);
-            if (coeff !== 0.0 && row.add(delta * coeff) < 0.0 &&
-                rowPair.first.type() !== SymbolType.External) {
-                this._infeasibleRows.push(rowPair.first);
-            }
+    /**
+     * Suggest the values for multiple edit variables (and solve once at the end).
+     *
+     * @param {{Variable: number}} suggestions suggested values keyed by edit variables.
+     */
+    public suggestValues(suggestions: Map<Variable, number>): void {
+        for (const [variable, value] of suggestions.entries()) {
+            this._suggestValue(variable, value);
         }
         this._dualOptimize();
     }
@@ -273,6 +242,60 @@ export class Solver {
                 pair.first.setValue(0.0);
             }
         }
+    }
+
+    /**
+     * Internal value suggestion routine. The public version simply
+     * dual optimizes after calling this routine.
+     * Also used by suggestValues.
+     * @param variable
+     * @param value
+     * @private
+     */
+    private _suggestValue(variable: Variable, value: number): void {
+        const editPair = this._editMap.find(variable);
+        if (editPair === undefined) {
+            throw new Error("unknown edit variable");
+        }
+
+        const rows = this._rowMap;
+        const info = editPair.second;
+        const delta = value - info.constant;
+        info.constant = value;
+
+        let rowPair: Pair<SolverSymbol, Row> | undefined;
+
+        // Check first if the positive error variable is basic.
+        const marker = info.tag.marker;
+        rowPair = rows.find(marker);
+        if (rowPair !== undefined) {
+            if (rowPair.second.add(-delta) < 0.0) {
+                this._infeasibleRows.push(marker);
+            }
+            return;
+        }
+
+        // Check next if the negative error variable is basic.
+        const other = info.tag.other;
+        rowPair = rows.find(other);
+        if (rowPair !== undefined) {
+            if (rowPair.second.add(delta) < 0.0) {
+                this._infeasibleRows.push(other);
+            }
+            return;
+        }
+
+        // Otherwise update each row where the error variables exist.
+        for (let i = 0, n = rows.size(); i < n; ++i) {
+            rowPair = rows.itemAt(i);
+            const row = rowPair.second;
+            const coeff = row.coefficientFor(marker);
+            if (coeff !== 0.0 && row.add(delta * coeff) < 0.0 &&
+                rowPair.first.type() !== SymbolType.External) {
+                this._infeasibleRows.push(rowPair.first);
+            }
+        }
+
     }
 
     /**

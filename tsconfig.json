@@ -2,10 +2,11 @@
     "compilerOptions": {
         "target": "ES5",
         "module": "es2015",
+        "outDir": "es",
         "moduleResolution": "node",
+        "downlevelIteration": true,
         "strict": true,
         "noImplicitAny": true,
-        "outDir": "es",
         "declaration": true
     },
     "include": [ "src/*.ts" ]
