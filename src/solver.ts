@@ -6,11 +6,11 @@
 | The full license is in the file COPYING.txt, distributed with this software.
 |----------------------------------------------------------------------------*/
 
-import { Constraint, Operator } from "../constraint";
-import { Expression } from "../expression";
-import { createMap, IMap, Pair } from "../maptype";
-import { Strength } from "../strength";
-import { Variable } from "../variable";
+import { Constraint, Operator } from "./constraint";
+import { Expression } from "./expression";
+import { createMap, IMap, Pair } from "./maptype";
+import { Strength } from "./strength";
+import { Variable } from "./variable";
 import { INVALID_SYMBOL, SolverSymbol, SymbolType } from "./symbol";
 
 /**
