@@ -1,12 +1,12 @@
 {
-  "name": "kiwi.js",
+  "name": "flightlessbird.js",
   "version": "1.1.2",
-  "homepage": "https://github.com/IjzerenHein/kiwi.js",
-  "repository": "https://github.com/IjzerenHein/kiwi.js",
-  "main": "lib/kiwi.js",
-  "module": "es/kiwi.js",
-  "types": "es/kiwi.d.ts",
-  "author": "Chris Colbert <sccolbert@gmail.com>",
+  "homepage": "https://github.com/MangoTeam/flightlessbird.js",
+  "repository": "https://github.com/IjzerenHein/flightlessbird.js",
+  "main": "lib/flightlessbird.js",
+  "types": "lib/flightlessbird.d.ts",
+  "type": "module",
+  "author": "Chris Colbert <sccolbert@gmail.com>, Dylan Lukes <dlukes@eng.ucsd.edu>",
   "contributors": [
     {
       "name": "Hein Rutjes <IJzerenHein>"
@@ -22,12 +22,11 @@
   ],
   "license": "BSD-3-Clause",
   "bugs": {
-    "url": "https://github.com/IjzerenHein/kiwi.js/issues"
+    "url": "https://github.com/MangoTeam/flightlessbird.js/issues"
   },
   "files": [
     "src",
     "lib",
-    "es",
     "COPYING.txt"
   ],
   "devDependencies": {
@@ -38,16 +37,14 @@
     "istanbul": "^0.4.5",
     "jsdoc-to-markdown": "^5.0.0",
     "mocha": "^6.2.0",
-    "rollup": "^1.17.0",
-    "rollup-plugin-uglify": "^6.0.2",
     "tslint": "^5.18.0",
     "typescript": "^3.5.3"
   },
   "scripts": {
-    "build": "tsc && tsc -t es6 --outDir tmp/es && rollup -c",
+    "build": "tsc",
     "test": "mocha",
     "cov": "istanbul cover ./node_modules/mocha/bin/_mocha --report lcovonly -R test/main",
-    "doc": "jsdoc2md -f tmp/kiwi.js -m none -g none > docs/Kiwi.md",
+    "doc": "jsdoc2md -f tmp/flightlessbird.js -m none -g none > docs/FlightlessBird.md",
     "lint": "tslint -c tslint.json 'src/**/*.ts'",
     "bench": "node bench/main.js"
   }
