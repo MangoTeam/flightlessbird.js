@@ -29,7 +29,7 @@ export class Strength {
     /**
      * The 'weak' symbolic strength.
      */
-    public weak = Strength.create(0.0, 0.0, 1.0);
+    public static weak = Strength.create(0.0, 0.0, 1.0);
 
     /**
      * Create a new symbolic strength.
