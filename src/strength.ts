@@ -27,6 +27,11 @@ export class Strength {
     public static medium = Strength.create(0.0, 1.0, 0.0);
 
     /**
+     * The 'weak' symbolic strength.
+     */
+    public weak = Strength.create(0.0, 0.0, 1.0);
+
+    /**
      * Create a new symbolic strength.
      *
      * @param a strong
@@ -50,9 +55,4 @@ export class Strength {
     public static clip(value: number) {
         return Math.max(0.0, Math.min(Strength.required, value));
     }
-
-    /**
-     * The 'weak' symbolic strength.
-     */
-    public weak = Strength.create(0.0, 0.0, 1.0);
 }
